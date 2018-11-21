@@ -1,0 +1,205 @@
+/* Includes ------------------------------------------------------------------*/
+#include "settings.h"
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <stdlib.h>         /* itoa() function */
+#include "twi.h"
+#include "uart.h"
+#include "lcd.h"
+
+/* Constants and macros ------------------------------------------------------*/
+/**
+ *  @brief Define UART buad rate.
+ */
+#define UART_BAUD_RATE 9600
+#define DHT12_SLAVE 0x5c
+
+/* Function prototypes -------------------------------------------------------*/
+/**
+ *  @brief Initialize UART, TWI, and Timer/Counter1.
+ */
+void setup(void);
+
+/**
+ *  @brief TWI Finite State Machine transmits all slave addresses.
+ */
+void fsm_twi_scanner(void);
+
+/* Global variables ----------------------------------------------------------*/
+typedef enum {
+    IDLE_STATE = 1,
+    HUMIDITY_STATE,
+    TEMPERATURE_STATE,
+    COMPARE_STATE
+} state_t;
+/* FSM for scanning TWI bus */
+state_t twi_state = IDLE_STATE;
+
+struct Values {
+    uint8_t humidity_integer;
+    uint8_t humidity_decimal;
+    uint8_t temperature_integer;
+    uint8_t temperature_decimal;
+};
+/* Data structure for humidity and temperature values */
+struct Values Meteo_values;
+
+/* user-defined symbols lcd*/
+uint8_t lcd_user_symbols[8*2] = {
+	0x00, /* WRITE YOUR DEFINITIONS HERE */};
+
+/* Functions -----------------------------------------------------------------*/
+int main(void)
+{
+    /* Initializations */
+    setup();
+
+    /* Enables interrupts by setting the global interrupt mask */
+    sei();
+
+    /* Put string to ringbuffer for transmitting via UART */
+    //uart_puts("\r\n---TWI scanner---");
+    //uart_puts("\r\n    0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f");
+
+    /* Forever loop */
+    while (1) {
+        /* Cycle here, do nothing, and wait for an interrupt */
+    }
+
+    return 0;
+}
+
+/*******************************************************************************
+ * Function: setup()
+ * Purpose:  Initialize UART, TWI, and Timer/Counter1.
+ * Input:    None
+ * Returns:  None
+ ******************************************************************************/
+void setup(void)
+{
+    /* Initialize UART: asynchronous, 8-bit data, no parity, 1-bit stop */
+    uart_init(UART_BAUD_SELECT(UART_BAUD_RATE, F_CPU));
+
+    /* Initialize TWI */
+    twi_init();
+
+    /* Timer/Counter1: update FSM state */
+    /* Clock prescaler 64 => overflows every 262 ms */
+    TCCR1B |= _BV(CS11) | _BV(CS10);
+    /* Overflow interrupt enable */
+    TIMSK1 |= _BV(TOIE1);
+
+    //SETUP LCD
+    
+    /* Initialize display and select type of cursor */
+    lcd_init(LCD_DISP_ON_CURSOR_BLINK);
+
+    /* Set pointer to beginning of CG RAM memory */
+    lcd_command(1<<LCD_CGRAM);
+    /* Store two new characters, i.e. 8x2 bytes */
+    for (uint8_t i = 0; i < (8*2); i++) {
+        lcd_data(lcd_user_symbols[i]);
+    }
+
+    /* Clear display and set cursor to home position */
+    lcd_clrscr();
+}
+
+/*******************************************************************************
+ * Function: Timer/Counter1 overflow interrupt
+ * Purpose:  Update state of TWI Finite State Machine.
+ ******************************************************************************/
+ISR(TIMER1_OVF_vect)
+{
+    fsm_twi_scanner();
+}
+
+/*******************************************************************************
+ * Function: fsm_twi_scanner()
+ * Purpose:  TWI Finite State Machine transmits all slave addresses.
+ * Input:    None
+ * Returns:  None
+ ******************************************************************************/
+void fsm_twi_scanner(void)
+{
+    /* Static variable inside a function keeps its value between callings */
+    uint8_t twi_status;
+    char uart_string[5];
+    char temperature_string;
+    char humidity_string;
+
+    switch (twi_state) {
+    case IDLE_STATE:
+        //Delay
+        twi_state = HUMIDITY_STATE;
+        break;
+
+    /* Transmit address of TWI slave device and check status */
+    case HUMIDITY_STATE:
+        twi_status = twi_start((DHT12_SLAVE<<1) + TWI_WRITE);
+
+        if (twi_status==0) {
+            twi_write(0x00);
+            twi_stop();
+            twi_start((DHT12_SLAVE<<1) + TWI_READ);
+            Meteo_values.humidity_integer = twi_read_ack();
+            Meteo_values.humidity_decimal = twi_read_nack();
+            twi_stop();
+            itoa(twi_status, humidity_string, 10);
+            uart_puts(uart_string);
+            twi_state = TEMPERATURE_STATE;
+        }
+        else {
+            itoa(twi_status, uart_string, 10);
+            uart_puts(uart_string);
+            twi_state = IDLE_STATE;
+        }
+
+        break;
+
+    /* Received ACK from slave */
+    case TEMPERATURE_STATE:
+
+        twi_status = twi_start((DHT12_SLAVE<<1) + TWI_WRITE);
+
+        if (twi_status==0) {
+            twi_write(0x02);
+            twi_stop();
+            twi_start((DHT12_SLAVE<<1) + TWI_READ);
+            Meteo_values.temperature_integer = twi_read_ack();
+            Meteo_values.temperature_decimal = twi_read_nack();
+            twi_stop();
+            itoa(twi_status, temperature_string, 10);
+            twi_state = UART_STATE;
+        }
+        else {
+            twi_state = HUMIDITY_STATE;
+        }
+
+        break;
+
+    case COMPARE_STATE:
+
+        //llamar a una función que saque por pantalla la humedad y temperatura
+        lcd_puts ()
+
+        //uart_puts();
+        if (humidity_string < xx && temperature_string < xx ) {
+            // Se enciende el motor
+            twi_state = SERVO_STATE;
+        } 
+        else {
+            twi_state = IDLE_STATE;
+        }
+        break;
+
+    case SERVO_STATE:
+
+    //inlcuir librería servo
+
+        break;
+
+    default:
+        twi_state = IDLE_STATE;
+    } /* End of switch (twi_state) */
+}
